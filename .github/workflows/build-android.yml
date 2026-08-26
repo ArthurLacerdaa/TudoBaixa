@@ -19,6 +19,68 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      # ============================================================
+      #  STEP 0 — VALIDAÇÕES ESTRUTURAIS (falha rápido, mensagens claras)
+      # ============================================================
+      - name: 🔍 Validação: Verificar arquivos essenciais do projeto
+        id: validate
+        continue-on-error: false
+        run: |
+          set +e
+          OK=0
+          FAIL_MSG=""
+
+          check() {
+            local path="$1"
+            local desc="$2"
+            if [ -e "$path" ]; then
+              echo "  ✅ $desc  ->  $path"
+            else
+              echo "  ❌ FALTANDO: $desc  ->  $path"
+              FAIL_MSG="$FAIL_MSG\n- $desc ($path)"
+              OK=1
+            fi
+          }
+
+          echo "== Verificando estrutura essencial =="
+          check "app/pubspec.yaml"            "pubspec.yaml do app Flutter"
+          check "app/lib/main.dart"            "Código Dart (lib/main.dart)"
+          check "app/android/build.gradle"     "Gradle root (android/build.gradle)"
+          check "app/android/app/build.gradle" "Gradle app (android/app/build.gradle)"
+          check "app/android/settings.gradle"  "Gradle settings"
+          check "app/android/gradle.properties""Gradle properties"
+          check "app/android/gradle/wrapper/gradle-wrapper.properties" "Gradle wrapper"
+          check "app/android/app/src/main/AndroidManifest.xml" "AndroidManifest.xml (com Share Sheet)"
+
+          echo ""
+          if [ $OK -ne 0 ]; then
+            echo "###############################################################"
+            echo "  ⚠️  ESTRUTURA INCOMPLETA — não conseguirá compilar!"
+            echo "###############################################################"
+            echo -e "Arquivos faltantes:$FAIL_MSG"
+            echo ""
+            echo "COMO RESOLVER (uma única vez, localmente no seu PC):"
+            echo ""
+            echo "  1) Instale Flutter SDK: https://docs.flutter.dev/get-started/install"
+            echo "  2) No terminal, dentro da pasta do projeto (TudoBaixa):"
+            echo ""
+            echo "     cd app"
+            echo "     flutter create --org com.example --project-name video_downloader --platforms=android,ios ."
+            echo ""
+            echo "     (o flutter create gera os arquivos nativos faltantes."
+            echo "      Como ja temos lib/main.dart e AndroidManifest, ele nao sobrescreve.)"
+            echo ""
+            echo "  3) Depois, git add -A && git commit && git push — volto aqui."
+            echo "###############################################################"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Toda estrutura essencial está presente. Vamos compilar!"
+
+      # ============================================================
+      #  STEP 1 — Setup Java e Flutter
+      # ============================================================
       - name: Setup Java JDK 17
         uses: actions/setup-java@v5
         with:
@@ -33,122 +95,99 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 🔥 Scaffold de arquivos Flutter/Android faltantes (flutter create seguro)
+      # ============================================================
+      #  STEP 2 — Garantir gradle-wrapper.jar (às vezes não vai no git)
+      # ============================================================
+      - name: 🧱 Garantir gradle wrapper (se necessário)
+        working-directory: app/android
         run: |
-          set -e
-          echo "::group::Backup de arquivos customizados"
-          # Faz backup de TUDO que escrevemos manualmente (será restaurado depois)
-          BACKUP_DIR=$(mktemp -d)
-          cp -r app/lib                          "$BACKUP_DIR/lib"
-          cp app/pubspec.yaml                     "$BACKUP_DIR/pubspec.yaml"
-          cp app/pubspec.lock 2>/dev/null || true "$BACKUP_DIR/pubspec.lock" 2>/dev/null || true
-          cp app/analysis_options.yaml 2>/dev/null || true "$BACKUP_DIR/analysis_options.yaml" 2>/dev/null || true
-          cp -r app/.gitignore 2>/dev/null || true "$BACKUP_DIR/app.gitignore" 2>/dev/null || true
-          cp -r app/android/app/src/main/AndroidManifest.xml    "$BACKUP_DIR/AndroidManifest.xml"
-          cp -r app/android/app/src/main/res                    "$BACKUP_DIR/res-custom"
-          cp -r app/android/app/src/main/kotlin                  "$BACKUP_DIR/kotlin-custom" 2>/dev/null || true
-          cp app/android/app/build.gradle                        "$BACKUP_DIR/app-build.gradle"
-          cp app/android/build.gradle                            "$BACKUP_DIR/root-build.gradle"
-          cp app/android/settings.gradle                         "$BACKUP_DIR/settings.gradle"
-          cp app/android/gradle.properties                       "$BACKUP_DIR/gradle.properties"
-          cp app/android/gradle/wrapper/gradle-wrapper.properties "$BACKUP_DIR/gradle-wrapper.properties"
-          cp -r app/ios/Runner/Info.plist                        "$BACKUP_DIR/ios-Info.plist" 2>/dev/null || true
-          echo "Backup concluido em: $BACKUP_DIR"
-          ls -la "$BACKUP_DIR"
-          echo "::endgroup::"
-
-          echo "::group::Executando flutter create (gera TODOS arquivos padrão faltantes)"
-          # Remove a pasta app TEMPORARIAMENTE para o flutter create criar do zero
-          rm -rf app
-          mkdir -p app
-          # Cria o projeto base do flutter (com arquivos nativos ANDROID + iOS corretos)
-          cd app
-          flutter create --org com.example --project-name video_downloader --platforms=android,ios .
-          cd ..
-          echo "Flutter create OK"
-          echo "::endgroup::"
-
-          echo "::group::Restaurando nossos arquivos customizados por cima"
-          # lib e pubspec (sempre substituímos — é 100% nosso código)
-          rm -rf app/lib
-          cp -r "$BACKUP_DIR/lib" app/lib
-          cp    "$BACKUP_DIR/pubspec.yaml" app/pubspec.yaml
-          [ -f "$BACKUP_DIR/pubspec.lock" ] && cp "$BACKUP_DIR/pubspec.lock" app/pubspec.lock || true
-          [ -f "$BACKUP_DIR/analysis_options.yaml" ] && cp "$BACKUP_DIR/analysis_options.yaml" app/analysis_options.yaml || true
-
-          # AndroidManifest customizado (tem o SHARE SHEET — NÃO PODE SER PERDIDO)
-          cp "$BACKUP_DIR/AndroidManifest.xml" app/android/app/src/main/AndroidManifest.xml
-          echo "  - AndroidManifest restaurado (Share Sheet preservado!)"
-
-          # Resources customizados (styles, colors, network config, launch_background, ic_foreground, etc)
-          if [ -d "$BACKUP_DIR/res-custom" ]; then
-            cp -r "$BACKUP_DIR/res-custom/"* app/android/app/src/main/res/ 2>/dev/null || true
-            echo "  - Resources customizados restaurados"
+          if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "✅ gradle-wrapper.jar já presente (OK)"
+          else
+            echo "⚠️  gradle-wrapper.jar faltando — tentando regenerar..."
+            if command -v gradle >/dev/null 2>&1; then
+              gradle wrapper --gradle-version 8.7
+            else
+              # Baixamos um JAR minimo valido usando o Gradle wrapper do Flutter
+              echo "Gradle CLI nao disponivel. Vamos deixar o Flutter gerar via pub get..."
+            fi
           fi
-
-          # Fontes kotlin (nossa MainActivity)
-          if [ -d "$BACKUP_DIR/kotlin-custom" ]; then
-            cp -r "$BACKUP_DIR/kotlin-custom/"* app/android/app/src/main/kotlin/ 2>/dev/null || true
-            echo "  - Fontes Kotlin restauradas"
-          fi
-
-          # Build gradles / settings / properties (se o nosso tinha algo especial)
-          [ -f "$BACKUP_DIR/app-build.gradle" ]       && cp "$BACKUP_DIR/app-build.gradle"       app/android/app/build.gradle      || true
-          [ -f "$BACKUP_DIR/root-build.gradle" ]      && cp "$BACKUP_DIR/root-build.gradle"      app/android/build.gradle           || true
-          [ -f "$BACKUP_DIR/settings.gradle" ]        && cp "$BACKUP_DIR/settings.gradle"        app/android/settings.gradle        || true
-          [ -f "$BACKUP_DIR/gradle.properties" ]      && cp "$BACKUP_DIR/gradle.properties"      app/android/gradle.properties      || true
-          [ -f "$BACKUP_DIR/gradle-wrapper.properties" ] && cp "$BACKUP_DIR/gradle-wrapper.properties" app/android/gradle/wrapper/gradle-wrapper.properties || true
-
-          # Info.plist iOS
-          if [ -f "$BACKUP_DIR/ios-Info.plist" ]; then
-            cp "$BACKUP_DIR/ios-Info.plist" app/ios/Runner/Info.plist
-            echo "  - iOS Info.plist restaurado"
-          fi
-
-          echo "::endgroup::"
-          echo "✅ Scaffold concluido. Estrutura Flutter/Android agora 100% completa."
 
       - name: Create .env placeholder (se necessário)
         run: echo "API_BASE_URL=${{ secrets.API_BASE_URL }}" > app/.env || true
 
       - name: Flutter Doctor
         working-directory: app
-        run: flutter doctor -v
+        run: flutter doctor -v || true
 
+      # ============================================================
+      #  STEP 3 — Dependências e Build
+      # ============================================================
       - name: Install dependencies
         working-directory: app
         run: flutter pub get
 
-      - name: Analyze Dart code
+      - name: Analyze Dart code (avisos não quebram o build)
         working-directory: app
         run: flutter analyze --no-fatal-infos || true
 
       - name: Clean previous builds
         working-directory: app
-        run: flutter clean
+        run: flutter clean || true
 
-      - name: Build APK Release (armeabi-v7a, arm64-v8a, x86_64 - universal)
+      - name: Build APK Release (universal — funciona em QUALQUER Android)
         working-directory: app
-        run: flutter build apk --release --no-shrink
+        run: |
+          set -e
+          echo "🔨 Iniciando build APK Release (universal)..."
+          flutter build apk --release --no-shrink
+          echo "✅ APK universal concluido."
+          ls -lah build/app/outputs/apk/release/
 
       - name: Build APK Split por ABI (menor tamanho)
         working-directory: app
-        run: flutter build apk --release --split-per-abi --no-shrink || true
+        continue-on-error: true
+        run: |
+          echo "🔨 Build APK split por ABI..."
+          flutter build apk --release --split-per-abi --no-shrink || true
+          echo "Concluido (com ou sem sucesso, o essencial eh o universal)"
 
-      - name: Build App Bundle (AAB - para Play Store)
+      - name: Build App Bundle (AAB — para Play Store)
         working-directory: app
+        continue-on-error: true
         run: flutter build appbundle --release --no-shrink || true
 
-      - name: Listar arquivos gerados
+      # ============================================================
+      #  STEP 4 — Listar arquivos e validar existencia do APK
+      # ============================================================
+      - name: 📦 Listar arquivos gerados e validar APK final
         run: |
+          set +e
           echo "=== APKs ==="
-          find app/build/app/outputs -name "*.apk" -type f || true
+          APK_UNIVERSAL="app/build/app/outputs/apk/release/app-release.apk"
+          find app/build/app/outputs -name "*.apk" -type f 2>/dev/null || echo "(nenhum APK encontrado ainda)"
+          echo ""
           echo "=== AAB ==="
-          find app/build/app/outputs -name "*.aab" -type f || true
+          find app/build/app/outputs -name "*.aab" -type f 2>/dev/null || echo "(nenhum AAB encontrado)"
+          echo ""
           echo "=== Tamanhos ==="
           du -h app/build/app/outputs/apk/release/*.apk 2>/dev/null || true
+          echo ""
+          if [ -f "$APK_UNIVERSAL" ]; then
+            TAM=$(du -h "$APK_UNIVERSAL" | cut -f1)
+            echo "==========================================="
+            echo "  ✅ APK UNIVERSAL ENCONTRADO ($TAM)"
+            echo "==========================================="
+            file "$APK_UNIVERSAL"
+          else
+            echo "❌ APK universal NAO foi gerado — falha no build!"
+            exit 1
+          fi
 
-      - name: Upload APK Universal
+      # ============================================================
+      #  STEP 5 — Upload Artifacts
+      # ============================================================
+      - name: Upload APK Universal ⭐ (recomendado)
         uses: actions/upload-artifact@v4
         with:
           name: tudobaixa-APK-universal
@@ -156,7 +195,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload APK ARM64 (aparelhos modernos)
+      - name: Upload APK ARM64 (aparelhos modernos / menor)
         uses: actions/upload-artifact@v4
         if: hashFiles('app/build/app/outputs/apk/release/app-arm64-v8a-release.apk') != ''
         with:
@@ -185,11 +224,20 @@ jobs:
 
       - name: Resumo final
         run: |
-          echo "## ✅ Build concluída com sucesso!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Arquivos gerados disponíveis na aba **Artifacts** desta execução." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **APK Universal**: instala em QUALQUER Android (recomendado para testes)" >> $GITHUB_STEP_SUMMARY
-          echo "- **APK arm64-v8a**: aparelhos modernos (menor tamanho)" >> $GITHUB_STEP_SUMMARY
-          echo "- **APK armeabi-v7a**: aparelhos mais antigos" >> $GITHUB_STEP_SUMMARY
-          echo "- **AAB**: para publicar na Google Play Store" >> $GITHUB_STEP_SUMMARY
+          TAM=$(du -h app/build/app/outputs/apk/release/app-release.apk 2>/dev/null | cut -f1 || echo "?")
+          {
+            echo "## ✅ Build concluída com sucesso!"
+            echo ""
+            echo "Arquivos gerados disponíveis na aba **Artifacts** desta execução."
+            echo ""
+            echo "- **APK Universal** (⭐ recomendado) — instala em QUALQUER Android — ~$TAM"
+            echo "- **APK arm64-v8a** — aparelhos modernos (menor tamanho)"
+            echo "- **APK armeabi-v7a** — aparelhos mais antigos"
+            echo "- **AAB** — para publicar na Google Play Store"
+            echo ""
+            echo "### Como instalar no celular:"
+            echo "1. Baixe **tudobaixa-APK-universal.zip**"
+            echo "2. Extraia o .zip → arquivo **app-release.apk**"
+            echo "3. Transfira para o celular (Drive, cabo, WhatsApp…)"
+            echo "4. No Android: toque no APK → Permitir fontes desconhecidas → Instalar"
+          } >> $GITHUB_STEP_SUMMARY
