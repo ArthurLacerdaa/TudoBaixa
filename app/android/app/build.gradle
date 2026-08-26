@@ -35,7 +35,22 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.setProperty("keyPassword", System.getenv("KEY_PASSWORD") ?: "")
 }
 
-def hasReleaseKeystore = keystoreProperties.getProperty("storeFile")?.trim() && new File(keystoreProperties.getProperty("storeFile")).exists()
+def storeFileProp = keystoreProperties.getProperty("storeFile")?.trim()
+def releaseKeystoreFile = null
+def hasReleaseKeystore = false
+
+if (storeFileProp && !storeFileProp.isEmpty()) {
+    try {
+        if (new File(storeFileProp).isAbsolute()) {
+            releaseKeystoreFile = new File(storeFileProp)
+        } else {
+            releaseKeystoreFile = rootProject.file(storeFileProp)
+        }
+        hasReleaseKeystore = releaseKeystoreFile.exists()
+    } catch (Exception ignored) {
+        hasReleaseKeystore = false
+    }
+}
 
 android {
     namespace "com.tudobaixa.app"
@@ -61,7 +76,7 @@ android {
             release {
                 keyAlias keystoreProperties.getProperty("keyAlias")
                 keyPassword keystoreProperties.getProperty("keyPassword")
-                storeFile file(keystoreProperties.getProperty("storeFile"))
+                storeFile releaseKeystoreFile
                 storePassword keystoreProperties.getProperty("storePassword")
             }
         }
