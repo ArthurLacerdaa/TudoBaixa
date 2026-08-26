@@ -1,0 +1,120 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Android APK (Release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Create .env placeholder (se necessário)
+        run: echo "API_BASE_URL=${{ secrets.API_BASE_URL }}" > app/.env || true
+
+      - name: Flutter Doctor
+        working-directory: app
+        run: flutter doctor -v
+
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        working-directory: app
+        run: flutter analyze --no-fatal-infos || true
+
+      - name: Clean previous builds
+        working-directory: app
+        run: flutter clean
+
+      - name: Build APK Release (armeabi-v7a, arm64-v8a, x86_64 - universal)
+        working-directory: app
+        run: flutter build apk --release --no-shrink
+
+      - name: Build APK Split por ABI (menor tamanho)
+        working-directory: app
+        run: flutter build apk --release --split-per-abi --no-shrink || true
+
+      - name: Build App Bundle (AAB - para Play Store)
+        working-directory: app
+        run: flutter build appbundle --release --no-shrink || true
+
+      - name: Listar arquivos gerados
+        run: |
+          echo "=== APKs ==="
+          find app/build/app/outputs -name "*.apk" -type f || true
+          echo "=== AAB ==="
+          find app/build/app/outputs -name "*.aab" -type f || true
+          echo "=== Tamanhos ==="
+          du -h app/build/app/outputs/apk/release/*.apk 2>/dev/null || true
+
+      - name: Upload APK Universal
+        uses: actions/upload-artifact@v4
+        with:
+          name: tudobaixa-APK-universal
+          path: app/build/app/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload APK ARM64 (aparelhos modernos)
+        uses: actions/upload-artifact@v4
+        if: hashFiles('app/build/app/outputs/apk/release/app-arm64-v8a-release.apk') != ''
+        with:
+          name: tudobaixa-APK-arm64-v8a
+          path: app/build/app/outputs/apk/release/app-arm64-v8a-release.apk
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Upload APK armeabi-v7a (aparelhos antigos)
+        uses: actions/upload-artifact@v4
+        if: hashFiles('app/build/app/outputs/apk/release/app-armeabi-v7a-release.apk') != ''
+        with:
+          name: tudobaixa-APK-armeabi-v7a
+          path: app/build/app/outputs/apk/release/app-armeabi-v7a-release.apk
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Upload App Bundle (AAB)
+        uses: actions/upload-artifact@v4
+        if: hashFiles('app/build/app/outputs/bundle/release/app-release.aab') != ''
+        with:
+          name: tudobaixa-AppBundle-AAB
+          path: app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Resumo final
+        run: |
+          echo "## ✅ Build concluída com sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Arquivos gerados disponíveis na aba **Artifacts** desta execução." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK Universal**: instala em QUALQUER Android (recomendado para testes)" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK arm64-v8a**: aparelhos modernos (menor tamanho)" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK armeabi-v7a**: aparelhos mais antigos" >> $GITHUB_STEP_SUMMARY
+          echo "- **AAB**: para publicar na Google Play Store" >> $GITHUB_STEP_SUMMARY
