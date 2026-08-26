@@ -61,6 +61,16 @@ jobs:
               "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
           fi
 
+      - name: Decode release keystore (if available)
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        working-directory: app/android
+        run: |
+          set -e
+          echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
+          ls -lh release-keystore.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
       - name: Install dependencies
         working-directory: app
         run: flutter pub get
@@ -69,12 +79,17 @@ jobs:
         working-directory: app
         env:
           API_URL: ${{ secrets.API_URL }}
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_BASE64 != '' && '../android/release-keystore.jks' || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           API_ARG=""
           if [ -n "$API_URL" ]; then
             API_ARG="--dart-define=API_URL=$API_URL"
           fi
           echo "API URL defined: ${API_URL:-<no>}"
+          echo "Keystore configured: ${KEYSTORE_FILE:+yes (${KEYSTORE_FILE})}"
           flutter build apk --release $API_ARG
 
       - name: Prepare APK artifact
@@ -92,6 +107,18 @@ jobs:
           fi
           ls -lh build/app/outputs/apk/release/app-release.apk
 
+      - name: Verify APK signature
+        working-directory: app
+        run: |
+          APK="build/app/outputs/apk/release/app-release.apk"
+          if command -v apksigner >/dev/null 2>&1; then
+            echo "--- APK Signature Info ---"
+            apksigner verify --print-certs "$APK" || true
+          else
+            echo "apksigner not available, using jarsigner fallback"
+            jarsigner -verify -verbose -certs "$APK" || true
+          fi
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -99,3 +126,10 @@ jobs:
           path: app/build/app/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 90
+
+      - name: Upload APK to release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/app/outputs/apk/release/app-release.apk
+          generate_release_notes: true

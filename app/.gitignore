@@ -42,3 +42,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing (SENSITIVE - NEVER commit)
+/android/key.properties
+/android/*.jks
+/android/*.keystore
+/android/keystore-base64.txt

@@ -1,4 +1,4 @@
-package com.example.video_downloader
+package com.tudobaixa.app
 
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity

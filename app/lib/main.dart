@@ -17,7 +17,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
-const String kDefaultApiUrl = 'http://10.0.2.2:8000';
+const String kDefaultApiUrl = 'https://tudobaixa-api.onrender.com';
 const String kApiBaseUrl =
     String.fromEnvironment('API_URL', defaultValue: kDefaultApiUrl);
 
