@@ -67,20 +67,20 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set +e
-          REPO_ROOT="$(cd ../../.. && pwd)"
-          KEYSTORE_ABS="$REPO_ROOT/app/android/release-keystore.jks"
-          echo "KEYSTORE_ABS=$KEYSTORE_ABS" >> "$GITHUB_ENV"
+          TARGET="release-keystore.jks"
           if [ -n "$KEYSTORE_BASE64" ] && [ "$KEYSTORE_BASE64" != "" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
-            if [ -f release-keystore.jks ]; then
-              echo "Keystore decoded successfully:"
-              ls -lh release-keystore.jks
-              echo "Absolute path: $KEYSTORE_ABS"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$TARGET"
+            if [ -f "$TARGET" ]; then
+              echo "=== KEYSTORE DECODED SUCCESSFULLY ==="
+              ls -lh "$TARGET"
+              echo "Expected location by Gradle: app/android/$TARGET"
             else
               echo "WARNING: Failed to decode keystore"
             fi
           else
-            echo "KEYSTORE_BASE64 not set - will use debug signing (fallback)"
+            echo "KEYSTORE_BASE64 not set as GitHub secret."
+            echo "APK will be signed with DEBUG keystore (installable for testing)."
+            echo "Tip: create a secret named KEYSTORE_BASE64 for release signing."
           fi
 
       - name: Install dependencies
@@ -91,7 +91,6 @@ jobs:
         working-directory: app
         env:
           API_URL: ${{ secrets.API_URL }}
-          KEYSTORE_FILE: ${{ env.KEYSTORE_ABS }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -100,12 +99,7 @@ jobs:
           if [ -n "$API_URL" ]; then
             API_ARG="--dart-define=API_URL=$API_URL"
           fi
-          if [ -n "$KEYSTORE_FILE" ] && [ -f "$KEYSTORE_FILE" ]; then
-            echo "Signing mode: RELEASE keystore at $KEYSTORE_FILE"
-          else
-            echo "Signing mode: DEBUG keystore (fallback - no release keystore configured)"
-          fi
-          echo "API URL defined: ${API_URL:-<no, using default>}"
+          echo "API URL defined: ${API_URL:-<no, using default in-app>}"
           flutter build apk --release $API_ARG
 
       - name: Prepare APK artifact

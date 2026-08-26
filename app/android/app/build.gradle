@@ -29,7 +29,7 @@ if (keystorePropertiesFile.exists()) {
         keystoreProperties.load(reader)
     }
 } else {
-    keystoreProperties.setProperty("storeFile", System.getenv("KEYSTORE_FILE") ?: "")
+    keystoreProperties.setProperty("storeFile", System.getenv("KEYSTORE_FILE") ?: "release-keystore.jks")
     keystoreProperties.setProperty("storePassword", System.getenv("KEYSTORE_PASSWORD") ?: "")
     keystoreProperties.setProperty("keyAlias", System.getenv("KEY_ALIAS") ?: "")
     keystoreProperties.setProperty("keyPassword", System.getenv("KEY_PASSWORD") ?: "")
@@ -47,9 +47,17 @@ if (storeFileProp && !storeFileProp.isEmpty()) {
             releaseKeystoreFile = rootProject.file(storeFileProp)
         }
         hasReleaseKeystore = releaseKeystoreFile.exists()
+        if (hasReleaseKeystore) {
+            println("=== KEYSTORE RELEASE ENCONTRADO: $releaseKeystoreFile ===")
+        } else {
+            println("=== KEYSTORE NÃO ENCONTRADO EM: $releaseKeystoreFile (fallback DEBUG) ===")
+        }
     } catch (Exception ignored) {
+        println("=== ERRO AO VERIFICAR KEYSTORE: $ignored (fallback DEBUG) ===")
         hasReleaseKeystore = false
     }
+} else {
+    println("=== PROPRIEDADE storeFile VAZIA (fallback DEBUG) ===")
 }
 
 android {
@@ -94,9 +102,8 @@ android {
     buildTypes {
         release {
             signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            minifyEnabled false
+            shrinkResources false
         }
         debug {
             minifyEnabled false
