@@ -147,7 +147,7 @@ class _HomePageState extends State<HomePage> {
 
   List<String> _extractUrls(String text) {
     final regex = RegExp(
-      r'https?://[^\s<>"\']+|www\.[^\s<>"\']+',
+      r'''https?://[^\s<>"']+|www\.[^\s<>"']+''',
       caseSensitive: false,
     );
     final matches = regex.allMatches(text);
