@@ -316,3 +316,96 @@ async def download_file(task_id: str):
 @app.get("/api/health")
 async def health():
     return {"status": "healthy", "temp_dir": TEMP_DIR}
+
+
+@app.post("/api/info")
+async def get_video_info(request: DownloadRequest):
+    url = request.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL vazia")
+
+    info_ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "format": "bestvideo*+bestaudio/best",
+        "ignoreerrors": False,
+        "no_color": True,
+        "extractor_retries": 2,
+        "retries": 2,
+    }
+
+    try:
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(
+            None,
+            lambda: _extract_info(info_ydl_opts, url)
+        )
+        return info
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=clean_error_message(f"Não foi possível extrair informações: {str(e)}")
+        )
+
+
+def _extract_info(ydl_opts, url):
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        formats = info.get("formats", [])
+
+        video_formats = []
+        for f in formats:
+            if f.get("vcodec") and f["vcodec"] != "none":
+                height = f.get("height") or 0
+                video_format = {
+                    "format_id": f.get("format_id"),
+                    "ext": f.get("ext", "mp4"),
+                    "resolution": f.get("resolution") or f"{height}p",
+                    "height": height,
+                    "filesize": f.get("filesize") or f.get("filesize_approx"),
+                    "fps": f.get("fps"),
+                }
+                video_formats.append(video_format)
+
+        video_formats = sorted(video_formats, key=lambda x: x["height"], reverse=True)
+        seen = set()
+        unique_formats = []
+        for vf in video_formats:
+            key = (vf["height"], vf["ext"])
+            if key not in seen:
+                seen.add(key)
+                unique_formats.append(vf)
+
+        best_thumbnail = ""
+        thumbnails = info.get("thumbnails", [])
+        if thumbnails:
+            priority = ["0", "1", "2", "3", "4", "maxres", "high", "medium", "default"]
+            thumbnails_sorted = sorted(
+                thumbnails,
+                key=lambda t: priority.index(t.get("id", "")) if t.get("id") in priority else 99,
+                reverse=True
+            )
+            best_thumbnail = thumbnails_sorted[0].get("url", "")
+
+        uploader = info.get("uploader") or info.get("channel") or info.get("author") or ""
+        title = info.get("title") or "Vídeo sem título"
+        duration = info.get("duration")
+        webpage_url = info.get("webpage_url") or info.get("original_url") or url
+        platform = info.get("extractor_key") or info.get("extractor") or "Desconhecida"
+
+        total_size = (
+            info.get("filesize")
+            or info.get("filesize_approx")
+        )
+
+        return {
+            "title": title,
+            "uploader": uploader,
+            "duration": duration,
+            "thumbnail": best_thumbnail,
+            "url": webpage_url,
+            "platform": platform,
+            "filesize": total_size,
+            "formats": unique_formats[:8],
+        }
