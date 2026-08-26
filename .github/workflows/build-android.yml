@@ -22,7 +22,7 @@ jobs:
       # ============================================================
       #  STEP 0 — VALIDAÇÕES ESTRUTURAIS (falha rápido, mensagens claras)
       # ============================================================
-      - name: 🔍 Validação: Verificar arquivos essenciais do projeto
+      - name: "🔍 Validação: Verificar arquivos essenciais do projeto"
         id: validate
         continue-on-error: false
         run: |
@@ -48,7 +48,7 @@ jobs:
           check "app/android/build.gradle"     "Gradle root (android/build.gradle)"
           check "app/android/app/build.gradle" "Gradle app (android/app/build.gradle)"
           check "app/android/settings.gradle"  "Gradle settings"
-          check "app/android/gradle.properties""Gradle properties"
+          check "app/android/gradle.properties" "Gradle properties"
           check "app/android/gradle/wrapper/gradle-wrapper.properties" "Gradle wrapper"
           check "app/android/app/src/main/AndroidManifest.xml" "AndroidManifest.xml (com Share Sheet)"
 
