@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: tudobaixa-api
+    runtime: docker
+    rootDir: ./backend
+    repo: https://github.com/ArthurLacerdaa/TudoBaixa
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    numInstances: 1
