@@ -62,10 +62,20 @@ jobs:
           fi
 
       - name: Install dependencies
+        working-directory: app
         run: flutter pub get
 
       - name: Build APK Release
-        run: flutter build apk --release
+        working-directory: app
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          API_ARG=""
+          if [ -n "$API_URL" ]; then
+            API_ARG="--dart-define=API_URL=$API_URL"
+          fi
+          echo "API URL defined: ${API_URL:-<no>}"
+          flutter build apk --release $API_ARG
 
       - name: Prepare APK artifact
         run: |

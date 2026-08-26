@@ -18,6 +18,8 @@ import 'package:shimmer/shimmer.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 const String kDefaultApiUrl = 'http://10.0.2.2:8000';
+const String kApiBaseUrl =
+    String.fromEnvironment('API_URL', defaultValue: kDefaultApiUrl);
 
 class AppTheme {
   static const Color background = Color(0xFF0D0818);
@@ -345,7 +347,7 @@ class _HomePageState extends State<HomePage> {
   final TextEditingController _urlController = TextEditingController();
   final List<DownloadTask> _tasks = [];
   late StreamSubscription _intentDataStreamSubscription;
-  String _apiUrl = kDefaultApiUrl;
+  String _apiUrl = kApiBaseUrl;
   Timer? _pollingTimer;
   bool _isProcessingShare = false;
 
@@ -373,9 +375,12 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _apiUrl = prefs.getString('api_url') ?? kDefaultApiUrl;
-    });
+    final stored = prefs.getString('api_url');
+    if (stored != null && stored.isNotEmpty) {
+      setState(() {
+        _apiUrl = stored;
+      });
+    }
   }
 
   Future<void> _saveApiUrl(String url) async {
@@ -516,7 +521,7 @@ class _HomePageState extends State<HomePage> {
         if (mounted) {
           setState(() {
             _previewError =
-                data['detail']?.toString() ?? 'Não foi possível analisar o link';
+                data['detail']?.toString() ?? 'Não foi possível analisar este link';
             _isLoadingPreview = false;
           });
         }
@@ -524,7 +529,8 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _previewError = 'Erro de conexão: verifique se a API está rodando em $_apiUrl';
+          _previewError =
+              'Sem conexão com o serviço. Verifique sua internet e tente novamente.';
           _isLoadingPreview = false;
         });
       }
@@ -580,8 +586,7 @@ class _HomePageState extends State<HomePage> {
       if (mounted) {
         setState(() {
           localTask.status = DownloadStatus.error;
-          localTask.error =
-              'Falha de conexão: $e. Verifique a URL da API nas configurações.';
+          localTask.error = 'Falha de conexão. Verifique sua internet.';
         });
       }
     }
@@ -972,11 +977,6 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.settings_rounded, size: 26),
-            onPressed: _showApiUrlDialog,
-            tooltip: 'Configurar API',
-          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -1224,17 +1224,6 @@ class _HomePageState extends State<HomePage> {
                       ),
                       style: TextButton.styleFrom(
                         foregroundColor: AppTheme.primaryPurpleLight,
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: _showApiUrlDialog,
-                      icon: const Icon(Icons.settings_rounded, size: 18),
-                      label: Text(
-                        'Configurar API',
-                        style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                      ),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.textMuted,
                       ),
                     ),
                   ],
