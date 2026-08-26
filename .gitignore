@@ -10,7 +10,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Apenas lib/ na raiz do repo (packaging Python). NÃO usar "lib/" solto:
+# isso ignorava app/lib/ e o GitHub Actions não recebia o main.dart.
+/lib/
+backend/lib/
 lib64/
 parts/
 sdist/

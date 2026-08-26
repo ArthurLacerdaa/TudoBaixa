@@ -15,229 +15,77 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    defaults:
+      run:
+        working-directory: app
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      # ============================================================
-      #  STEP 0 — VALIDAÇÕES ESTRUTURAIS (falha rápido, mensagens claras)
-      # ============================================================
-      - name: "🔍 Validação: Verificar arquivos essenciais do projeto"
-        id: validate
-        continue-on-error: false
+      - name: Confirm Flutter project files
         run: |
-          set +e
-          OK=0
-          FAIL_MSG=""
+          set -e
+          test -f pubspec.yaml
+          test -f lib/main.dart
+          test -f android/app/src/main/AndroidManifest.xml
+          test -f android/app/build.gradle
+          echo "Flutter project root: app/"
 
-          check() {
-            local path="$1"
-            local desc="$2"
-            if [ -e "$path" ]; then
-              echo "  ✅ $desc  ->  $path"
-            else
-              echo "  ❌ FALTANDO: $desc  ->  $path"
-              FAIL_MSG="$FAIL_MSG\n- $desc ($path)"
-              OK=1
-            fi
-          }
-
-          echo "== Verificando estrutura essencial =="
-          check "app/pubspec.yaml"            "pubspec.yaml do app Flutter"
-          check "app/lib/main.dart"            "Código Dart (lib/main.dart)"
-          check "app/android/build.gradle"     "Gradle root (android/build.gradle)"
-          check "app/android/app/build.gradle" "Gradle app (android/app/build.gradle)"
-          check "app/android/settings.gradle"  "Gradle settings"
-          check "app/android/gradle.properties" "Gradle properties"
-          check "app/android/gradle/wrapper/gradle-wrapper.properties" "Gradle wrapper"
-          check "app/android/app/src/main/AndroidManifest.xml" "AndroidManifest.xml (com Share Sheet)"
-
-          echo ""
-          if [ $OK -ne 0 ]; then
-            echo "###############################################################"
-            echo "  ⚠️  ESTRUTURA INCOMPLETA — não conseguirá compilar!"
-            echo "###############################################################"
-            echo -e "Arquivos faltantes:$FAIL_MSG"
-            echo ""
-            echo "COMO RESOLVER (uma única vez, localmente no seu PC):"
-            echo ""
-            echo "  1) Instale Flutter SDK: https://docs.flutter.dev/get-started/install"
-            echo "  2) No terminal, dentro da pasta do projeto (TudoBaixa):"
-            echo ""
-            echo "     cd app"
-            echo "     flutter create --org com.example --project-name video_downloader --platforms=android,ios ."
-            echo ""
-            echo "     (o flutter create gera os arquivos nativos faltantes."
-            echo "      Como ja temos lib/main.dart e AndroidManifest, ele nao sobrescreve.)"
-            echo ""
-            echo "  3) Depois, git add -A && git commit && git push — volto aqui."
-            echo "###############################################################"
-            exit 1
-          fi
-
-          echo ""
-          echo "✅ Toda estrutura essencial está presente. Vamos compilar!"
-
-      # ============================================================
-      #  STEP 1 — Setup Java e Flutter
-      # ============================================================
       - name: Setup Java JDK 17
         uses: actions/setup-java@v5
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
-          cache: 'gradle'
+          cache: gradle
 
       - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.3'
-          channel: 'stable'
+          channel: stable
           cache: true
 
-      # ============================================================
-      #  STEP 2 — Garantir gradle-wrapper.jar (às vezes não vai no git)
-      # ============================================================
-      - name: 🧱 Garantir gradle wrapper (se necessário)
+      - name: Ensure Gradle wrapper JAR
         working-directory: app/android
         run: |
-          if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "✅ gradle-wrapper.jar já presente (OK)"
+          set -e
+          WRAPPER_DIR="gradle/wrapper"
+          JAR="$WRAPPER_DIR/gradle-wrapper.jar"
+          mkdir -p "$WRAPPER_DIR"
+          if [ -f "$JAR" ]; then
+            echo "gradle-wrapper.jar already present"
           else
-            echo "⚠️  gradle-wrapper.jar faltando — tentando regenerar..."
-            if command -v gradle >/dev/null 2>&1; then
-              gradle wrapper --gradle-version 8.7
-            else
-              # Baixamos um JAR minimo valido usando o Gradle wrapper do Flutter
-              echo "Gradle CLI nao disponivel. Vamos deixar o Flutter gerar via pub get..."
-            fi
+            echo "Downloading gradle-wrapper.jar"
+            curl -fsSL -o "$JAR" \
+              "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar"
           fi
 
-      - name: Create .env placeholder (se necessário)
-        run: echo "API_BASE_URL=${{ secrets.API_BASE_URL }}" > app/.env || true
-
-      - name: Flutter Doctor
-        working-directory: app
-        run: flutter doctor -v || true
-
-      # ============================================================
-      #  STEP 3 — Dependências e Build
-      # ============================================================
       - name: Install dependencies
-        working-directory: app
         run: flutter pub get
 
-      - name: Analyze Dart code (avisos não quebram o build)
-        working-directory: app
-        run: flutter analyze --no-fatal-infos || true
+      - name: Build APK Release
+        run: flutter build apk --release
 
-      - name: Clean previous builds
-        working-directory: app
-        run: flutter clean || true
-
-      - name: Build APK Release (universal — funciona em QUALQUER Android)
-        working-directory: app
+      - name: Prepare APK artifact
         run: |
           set -e
-          echo "🔨 Iniciando build APK Release (universal)..."
-          flutter build apk --release --no-shrink
-          echo "✅ APK universal concluido."
-          ls -lah build/app/outputs/apk/release/
-
-      - name: Build APK Split por ABI (menor tamanho)
-        working-directory: app
-        continue-on-error: true
-        run: |
-          echo "🔨 Build APK split por ABI..."
-          flutter build apk --release --split-per-abi --no-shrink || true
-          echo "Concluido (com ou sem sucesso, o essencial eh o universal)"
-
-      - name: Build App Bundle (AAB — para Play Store)
-        working-directory: app
-        continue-on-error: true
-        run: flutter build appbundle --release --no-shrink || true
-
-      # ============================================================
-      #  STEP 4 — Listar arquivos e validar existencia do APK
-      # ============================================================
-      - name: 📦 Listar arquivos gerados e validar APK final
-        run: |
-          set +e
-          echo "=== APKs ==="
-          APK_UNIVERSAL="app/build/app/outputs/apk/release/app-release.apk"
-          find app/build/app/outputs -name "*.apk" -type f 2>/dev/null || echo "(nenhum APK encontrado ainda)"
-          echo ""
-          echo "=== AAB ==="
-          find app/build/app/outputs -name "*.aab" -type f 2>/dev/null || echo "(nenhum AAB encontrado)"
-          echo ""
-          echo "=== Tamanhos ==="
-          du -h app/build/app/outputs/apk/release/*.apk 2>/dev/null || true
-          echo ""
-          if [ -f "$APK_UNIVERSAL" ]; then
-            TAM=$(du -h "$APK_UNIVERSAL" | cut -f1)
-            echo "==========================================="
-            echo "  ✅ APK UNIVERSAL ENCONTRADO ($TAM)"
-            echo "==========================================="
-            file "$APK_UNIVERSAL"
-          else
-            echo "❌ APK universal NAO foi gerado — falha no build!"
+          mkdir -p build/app/outputs/apk/release
+          if [ -f build/app/outputs/flutter-apk/app-release.apk ]; then
+            cp -f build/app/outputs/flutter-apk/app-release.apk \
+              build/app/outputs/apk/release/app-release.apk
+          fi
+          if [ ! -f build/app/outputs/apk/release/app-release.apk ]; then
+            echo "APK not found. Listing outputs:"
+            find build/app/outputs -name '*.apk' -type f || true
             exit 1
           fi
+          ls -lh build/app/outputs/apk/release/app-release.apk
 
-      # ============================================================
-      #  STEP 5 — Upload Artifacts
-      # ============================================================
-      - name: Upload APK Universal ⭐ (recomendado)
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: tudobaixa-APK-universal
+          name: tudobaixa-apk-release
           path: app/build/app/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 90
-
-      - name: Upload APK ARM64 (aparelhos modernos / menor)
-        uses: actions/upload-artifact@v4
-        if: hashFiles('app/build/app/outputs/apk/release/app-arm64-v8a-release.apk') != ''
-        with:
-          name: tudobaixa-APK-arm64-v8a
-          path: app/build/app/outputs/apk/release/app-arm64-v8a-release.apk
-          if-no-files-found: ignore
-          retention-days: 90
-
-      - name: Upload APK armeabi-v7a (aparelhos antigos)
-        uses: actions/upload-artifact@v4
-        if: hashFiles('app/build/app/outputs/apk/release/app-armeabi-v7a-release.apk') != ''
-        with:
-          name: tudobaixa-APK-armeabi-v7a
-          path: app/build/app/outputs/apk/release/app-armeabi-v7a-release.apk
-          if-no-files-found: ignore
-          retention-days: 90
-
-      - name: Upload App Bundle (AAB)
-        uses: actions/upload-artifact@v4
-        if: hashFiles('app/build/app/outputs/bundle/release/app-release.aab') != ''
-        with:
-          name: tudobaixa-AppBundle-AAB
-          path: app/build/app/outputs/bundle/release/app-release.aab
-          if-no-files-found: ignore
-          retention-days: 90
-
-      - name: Resumo final
-        run: |
-          TAM=$(du -h app/build/app/outputs/apk/release/app-release.apk 2>/dev/null | cut -f1 || echo "?")
-          {
-            echo "## ✅ Build concluída com sucesso!"
-            echo ""
-            echo "Arquivos gerados disponíveis na aba **Artifacts** desta execução."
-            echo ""
-            echo "- **APK Universal** (⭐ recomendado) — instala em QUALQUER Android — ~$TAM"
-            echo "- **APK arm64-v8a** — aparelhos modernos (menor tamanho)"
-            echo "- **APK armeabi-v7a** — aparelhos mais antigos"
-            echo "- **AAB** — para publicar na Google Play Store"
-            echo ""
-            echo "### Como instalar no celular:"
-            echo "1. Baixe **tudobaixa-APK-universal.zip**"
-            echo "2. Extraia o .zip → arquivo **app-release.apk**"
-            echo "3. Transfira para o celular (Drive, cabo, WhatsApp…)"
-            echo "4. No Android: toque no APK → Permitir fontes desconhecidas → Instalar"
-          } >> $GITHUB_STEP_SUMMARY
