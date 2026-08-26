@@ -15,7 +15,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:gal/gal.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 const String kDefaultApiUrl = 'http://10.0.2.2:8000';
@@ -708,21 +707,25 @@ class _HomePageState extends State<HomePage> {
 
   Future<bool> _saveToGallery(File file, String filename) async {
     try {
-      await Gal.putVideo(file.path, album: 'TudoBaixa');
-      return true;
-    } catch (e) {
-      try {
-        final Directory? dir = Platform.isAndroid
-            ? Directory('/storage/emulated/0/Download')
-            : await getApplicationDocumentsDirectory();
-        if (dir != null) {
-          if (!await dir.exists()) await dir.create(recursive: true);
-          final target = File('${dir.path}/$filename');
-          await file.copy(target.path);
-          return true;
-        }
-      } catch (_) {}
+      final Directory? dir = Platform.isAndroid
+          ? Directory('/storage/emulated/0/Download')
+          : await getApplicationDocumentsDirectory();
+      if (dir != null) {
+        if (!await dir.exists()) await dir.create(recursive: true);
+        final target = File('${dir.path}/TudoBaixa_${DateTime.now().millisecondsSinceEpoch}_$filename');
+        await file.copy(target.path);
+        return true;
+      }
       return false;
+    } catch (_) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final target = File('${dir.path}/$filename');
+        await file.copy(target.path);
+        return true;
+      } catch (_) {
+        return false;
+      }
     }
   }
 
