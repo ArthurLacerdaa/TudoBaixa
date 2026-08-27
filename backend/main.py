@@ -27,6 +27,7 @@ LOCAL_COOKIE_FILE = BACKEND_DIR / "cookies.txt"
 RENDER_COOKIE_FILE = Path("/etc/secrets/cookies.txt")
 DEFAULT_COOKIE_FILE = RENDER_COOKIE_FILE if RENDER_COOKIE_FILE.is_file() else LOCAL_COOKIE_FILE
 COOKIE_FILE = Path(os.getenv("YTDLP_COOKIES_FILE", str(DEFAULT_COOKIE_FILE)))
+WRITABLE_COOKIE_FILE = Path(TEMP_DIR) / "cookies.txt"
 
 download_tasks: Dict[str, dict] = {}
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
@@ -104,10 +105,42 @@ def expand_url(url: str) -> str:
             return url
 
 
-def add_cookie_file(ydl_opts: dict) -> dict:
-    """Use Netscape cookies when configured, without requiring them for TikTok."""
-    if COOKIE_FILE.is_file():
-        ydl_opts["cookiefile"] = str(COOKIE_FILE)
+def _cookie_file_for_yt_dlp() -> Optional[Path]:
+    """Return a writable cookie file for yt-dlp.
+
+    Render mounts secret files under /etc/secrets as read-only. yt-dlp updates
+    its cookie jar while extracting metadata, so it must use a temporary copy.
+    """
+    if not COOKIE_FILE.is_file():
+        return None
+    if COOKIE_FILE != RENDER_COOKIE_FILE:
+        return COOKIE_FILE
+
+    if not WRITABLE_COOKIE_FILE.is_file():
+        shutil.copyfile(COOKIE_FILE, WRITABLE_COOKIE_FILE)
+        os.chmod(WRITABLE_COOKIE_FILE, 0o600)
+    return WRITABLE_COOKIE_FILE
+
+
+def _requires_auth_cookies(url: str) -> bool:
+    """Cookies are only needed for platforms that require an authenticated session."""
+    host = (urlparse(url).hostname or "").lower()
+    return (
+        host == "youtu.be"
+        or host == "youtube.com"
+        or host.endswith(".youtube.com")
+        or host == "instagram.com"
+        or host.endswith(".instagram.com")
+    )
+
+
+def add_cookie_file(ydl_opts: dict, url: str) -> dict:
+    """Use cookies only for YouTube and Instagram, never for TikTok."""
+    if not _requires_auth_cookies(url):
+        return ydl_opts
+    cookie_file = _cookie_file_for_yt_dlp()
+    if cookie_file is not None:
+        ydl_opts["cookiefile"] = str(cookie_file)
     return ydl_opts
 
 
@@ -228,7 +261,7 @@ async def run_download(task_id: str, url: str):
             "no_color": True,
             "extractor_retries": 2,
             "retries": 2,
-        })
+        }, url)
         try:
             loop = asyncio.get_event_loop()
             info = await loop.run_in_executor(
@@ -385,7 +418,7 @@ async def get_video_info(request: DownloadRequest):
         "no_color": True,
         "extractor_retries": 2,
         "retries": 2,
-    })
+    }, url)
 
     try:
         loop = asyncio.get_event_loop()
