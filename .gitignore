@@ -34,6 +34,8 @@ backend/.env
 # Temporary downloads
 backend/temp/
 backend/tmp/
+backend/cookies.txt
+cookies.txt
 *.mp4
 *.webm
 *.mp3

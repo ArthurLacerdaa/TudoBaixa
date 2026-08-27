@@ -7,6 +7,9 @@ import re
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -19,6 +22,11 @@ TEMP_DIR = tempfile.mkdtemp(prefix="video_downloader_")
 MAX_CONCURRENT_DOWNLOADS = 2
 DOWNLOAD_TIMEOUT = 600
 FILE_EXPIRY_HOURS = 2
+BACKEND_DIR = Path(__file__).resolve().parent
+LOCAL_COOKIE_FILE = BACKEND_DIR / "cookies.txt"
+RENDER_COOKIE_FILE = Path("/etc/secrets/cookies.txt")
+DEFAULT_COOKIE_FILE = RENDER_COOKIE_FILE if RENDER_COOKIE_FILE.is_file() else LOCAL_COOKIE_FILE
+COOKIE_FILE = Path(os.getenv("YTDLP_COOKIES_FILE", str(DEFAULT_COOKIE_FILE)))
 
 download_tasks: Dict[str, dict] = {}
 download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
@@ -60,6 +68,47 @@ def extract_urls(text: str) -> List[str]:
             seen.add(url)
             unique.append(url)
     return unique
+
+
+def _is_facebook_short_url(url: str) -> bool:
+    """Return whether *url* is a Facebook URL that needs redirect resolution."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return (
+        host == "fb.watch"
+        or host == "fb.me"
+        or host == "facebook.com"
+        or host.endswith(".facebook.com")
+    ) and ("/share" in parsed.path or host in {"fb.watch", "fb.me"})
+
+
+def expand_url(url: str) -> str:
+    """Resolve Facebook share URLs before passing them to yt-dlp."""
+    if not _is_facebook_short_url(url):
+        return url
+
+    try:
+        request = Request(url, method="HEAD", headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=10) as response:
+            return response.geturl()
+    except Exception:
+        # Some Facebook endpoints reject HEAD. A small GET still follows redirects.
+        try:
+            request = Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0", "Range": "bytes=0-0"},
+            )
+            with urlopen(request, timeout=10) as response:
+                return response.geturl()
+        except Exception:
+            return url
+
+
+def add_cookie_file(ydl_opts: dict) -> dict:
+    """Use Netscape cookies when configured, without requiring them for TikTok."""
+    if COOKIE_FILE.is_file():
+        ydl_opts["cookiefile"] = str(COOKIE_FILE)
+    return ydl_opts
 
 
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -166,7 +215,7 @@ async def run_download(task_id: str, url: str):
             return
         task["status"] = "downloading"
         output_template = os.path.join(TEMP_DIR, f"{task_id}_%(title).100B.%(ext)s")
-        ydl_opts = {
+        ydl_opts = add_cookie_file({
             "outtmpl": output_template,
             "format": "bestvideo*+bestaudio/best",
             "merge_output_format": "mp4",
@@ -179,7 +228,7 @@ async def run_download(task_id: str, url: str):
             "no_color": True,
             "extractor_retries": 2,
             "retries": 2,
-        }
+        })
         try:
             loop = asyncio.get_event_loop()
             info = await loop.run_in_executor(
@@ -242,6 +291,7 @@ async def start_download(request: DownloadRequest, background_tasks: BackgroundT
     url = request.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL vazia")
+    url = expand_url(url)
     task_id = _create_task(url)
     background_tasks.add_task(run_download, task_id, url)
     return {"task_id": task_id, "status": "queued", "url": url}
@@ -254,6 +304,7 @@ async def start_multi_download(request: MultiDownloadRequest, background_tasks: 
         raise HTTPException(status_code=400, detail="Nenhuma URL encontrada no texto")
     tasks = []
     for url in urls:
+        url = expand_url(url)
         task_id = _create_task(url)
         background_tasks.add_task(run_download, task_id, url)
         tasks.append({"task_id": task_id, "url": url, "status": "queued"})
@@ -323,8 +374,9 @@ async def get_video_info(request: DownloadRequest):
     url = request.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL vazia")
+    url = expand_url(url)
 
-    info_ydl_opts = {
+    info_ydl_opts = add_cookie_file({
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
@@ -333,7 +385,7 @@ async def get_video_info(request: DownloadRequest):
         "no_color": True,
         "extractor_retries": 2,
         "retries": 2,
-    }
+    })
 
     try:
         loop = asyncio.get_event_loop()
